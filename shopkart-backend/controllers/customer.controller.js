@@ -1,37 +1,37 @@
 import Customer from "../models/customer.model.js";
-import { generateTokenAndSetCookie } from "../utils/generateToken.js";
+import jwt from "jsonwebtoken";
+
+const JWT_SECRET = process.env.JWT_SECRET || "shopkart_super_secret_jwt_key_2026";
 
 export const registerCustomer = async (req, res) => {
   try {
     const { fullName, email, password, phone } = req.body;
 
     if (!fullName || !email || !password || !phone) {
-      return res.status(400).json({ success: false, message: "All fields are mandatory" });
+      return res.status(400).json({ message: "All fields are required" });
     }
 
-    if (password.length < 6) {
-      return res.status(400).json({ success: false, message: "Password must contain at least 6 characters" });
+    const existing = await Customer.findOne({ email });
+    if (existing) {
+      return res.status(400).json({ message: "Email already registered" });
     }
 
-    const existingCustomer = await Customer.findOne({ email });
-    if (existingCustomer) {
-      return res.status(409).json({ success: false, message: "Email already exists" });
-    }
+    const customer = new Customer({
+      fullName,
+      email,
+      password,
+      phone,
+      wishlist: [],
+    });
 
-    const customer = await Customer.create({ fullName, email, password, phone });
+    await customer.save();
 
     return res.status(201).json({
       success: true,
       message: "Customer registered successfully",
-      customer: {
-        _id: customer._id,
-        fullName: customer.fullName,
-        email: customer.email,
-        phone: customer.phone,
-      },
     });
   } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ message: error.message });
   }
 };
 
@@ -40,86 +40,91 @@ export const loginCustomer = async (req, res) => {
     const { email, password } = req.body;
 
     if (!email || !password) {
-      return res.status(400).json({ success: false, message: "Email and password are required" });
+      return res.status(400).json({ message: "Email and password are required" });
     }
 
     const customer = await Customer.findOne({ email });
     if (!customer) {
-      return res.status(401).json({ success: false, message: "Invalid credentials" });
+      return res.status(401).json({ message: "Invalid credentials" });
     }
 
     const isMatch = await customer.comparePassword(password);
     if (!isMatch) {
-      return res.status(401).json({ success: false, message: "Invalid credentials" });
+      return res.status(401).json({ message: "Invalid credentials" });
     }
 
-    generateTokenAndSetCookie(res, customer._id);
+    const token = jwt.sign(
+      { id: customer._id, email: customer.email },
+      JWT_SECRET,
+      { expiresIn: "7d" }
+    );
+
+    res.cookie("token", token, {
+      httpOnly: true,
+      secure: false,
+      sameSite: "lax",
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+    });
 
     return res.status(200).json({
       success: true,
-      message: "Login successful",
+      message: "Logged in successfully",
+      customer: {
+        _id: customer._id,
+        fullName: customer.fullName,
+        email: customer.email,
+      },
     });
   } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ message: error.message });
   }
 };
 
+// Export as getMyProfile (and alias getCustomerProfile)
 export const getMyProfile = async (req, res) => {
   try {
-    return res.status(200).json({
-      _id: req.user._id,
-      fullName: req.user.fullName,
-      email: req.user.email,
-      phone: req.user.phone,
-    });
-  } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
+    const token = req.cookies?.token;
+    if (!token) return res.status(401).json({ message: "Not authenticated" });
+
+    const decoded = jwt.verify(token, JWT_SECRET);
+    const customer = await Customer.findById(decoded.id).select("-password");
+
+    if (!customer) return res.status(404).json({ message: "User not found" });
+
+    return res.status(200).json({ success: true, customer });
+  } catch (err) {
+    return res.status(401).json({ message: "Invalid session" });
   }
 };
+export const getCustomerProfile = getMyProfile;
 
 export const logoutCustomer = async (req, res) => {
-  try {
-    res.cookie("token", "", {
-      httpOnly: true,
-      expires: new Date(0),
-    });
-
-    return res.status(200).json({
-      success: true,
-      message: "Logged out successfully",
-    });
-  } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
-  }
+  res.clearCookie("token");
+  return res.status(200).json({ success: true, message: "Logged out" });
 };
 
 export const changePassword = async (req, res) => {
   try {
     const { oldPassword, newPassword } = req.body;
+    const token = req.cookies?.token;
 
-    if (!oldPassword || !newPassword) {
-      return res.status(400).json({ success: false, message: "Both old and new passwords are required" });
-    }
+    if (!token) return res.status(401).json({ message: "Not authenticated" });
 
-    if (newPassword.length < 6) {
-      return res.status(400).json({ success: false, message: "New password must be at least 6 characters" });
-    }
+    const decoded = jwt.verify(token, JWT_SECRET);
+    const customer = await Customer.findById(decoded.id);
 
-    const customer = await Customer.findById(req.user._id);
+    if (!customer) return res.status(404).json({ message: "User not found" });
 
     const isMatch = await customer.comparePassword(oldPassword);
     if (!isMatch) {
-      return res.status(400).json({ success: false, message: "Incorrect old password" });
+      return res.status(400).json({ message: "Current password is incorrect" });
     }
 
     customer.password = newPassword;
     await customer.save();
 
-    return res.status(200).json({
-      success: true,
-      message: "Password changed successfully",
-    });
-  } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
+    return res.status(200).json({ success: true, message: "Password updated successfully" });
+  } catch (err) {
+    return res.status(500).json({ message: err.message });
   }
 };

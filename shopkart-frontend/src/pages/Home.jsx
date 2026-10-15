@@ -11,7 +11,7 @@ function Home({ setIsAuthenticated }) {
     getCustomerProfile()
       .then((res) => {
         console.log("Customer Profile Response:", res.data);
-        // Extracts data regardless of backend key structure
+        
         const userData =
           res.data.customer ||
           res.data.data ||

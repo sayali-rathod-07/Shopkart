@@ -20,7 +20,7 @@ function Register() {
     e.preventDefault();
     setError("");
     try {
-      // Sends both variations so backend checks pass
+      
       const payload = {
         name: formData.name,
         fullName: formData.name,
