@@ -61,11 +61,10 @@ export const loginCustomer = async (req, res) => {
 
     res.cookie("token", token, {
       httpOnly: true,
-      secure: false,
-      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production" || true, // Must be true for HTTPS (Render & Vercel)
+      sameSite: "none", // Must be "none" across different domains
       maxAge: 7 * 24 * 60 * 60 * 1000,
     });
-
     return res.status(200).json({
       success: true,
       message: "Logged in successfully",
